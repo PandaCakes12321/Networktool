@@ -1,6 +1,6 @@
 // Networktool — Floating network monitor widget for Windows
 // Author : Teffers
-// Version: 1.08
+// Version: 1.09
 // License: Private
 
 using System;
@@ -273,13 +273,15 @@ public static class WifiManager
             var connectedSsidFinal = scanResult.Networks.FirstOrDefault(n => n.IsConnected)?.SSID;
             if (connectedSsidFinal == null)
             {
-                WlanOpenHandle(2, IntPtr.Zero, out _, out var h2);
-                if (h2 != IntPtr.Zero)
+                uint h2ret = WlanOpenHandle(2, IntPtr.Zero, out _, out var h2);
+                if (h2ret == 0 && h2 != IntPtr.Zero)
                 {
                     IntPtr il2 = IntPtr.Zero;
                     try
                     {
                         WlanEnumInterfaces(h2, IntPtr.Zero, out il2);
+                        int ifCount2 = Marshal.ReadInt32(il2);
+                        if (ifCount2 < 1) { WlanFreeMemory(il2); il2 = IntPtr.Zero; return scanResult; }
                         var ig2Ptr = new IntPtr(il2.ToInt64() + 8);
                         var ig2Info = Marshal.PtrToStructure<WLAN_INTERFACE_INFO>(ig2Ptr);
                         var ig2 = ig2Info.InterfaceGuid;

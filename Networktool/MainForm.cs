@@ -1,6 +1,6 @@
 // Networktool — Floating network monitor widget for Windows
 // Author : Teffers
-// Version: 1.08
+// Version: 1.09
 // License: Private
 
 using System;
@@ -22,6 +22,7 @@ public class MainForm : Form
     private PingMonitor _ping;
     private TrafficMonitor _traffic = null!;
     private System.Windows.Forms.Timer _refreshTimer = null!;
+    private System.Windows.Forms.Timer _bwSaveTimer = null!;
     private NotifyIcon _trayIcon = null!;
     private volatile bool _isSwapping = false;
     private volatile bool _isScanning = false;
@@ -66,6 +67,11 @@ public class MainForm : Form
         _refreshTimer = new System.Windows.Forms.Timer { Interval = 5000 };
         _refreshTimer.Tick += async (s, e) => await RefreshNetworksAsync();
         _refreshTimer.Start();
+
+        NetworkButton.BandwidthData = _settings.BandwidthTotals;
+        _bwSaveTimer = new System.Windows.Forms.Timer { Interval = 60000 };
+        _bwSaveTimer.Tick += (s, e) => _settings.Save();
+        _bwSaveTimer.Start();
 
         Load += async (s, e) =>
         {
@@ -508,6 +514,8 @@ public class MainForm : Form
         }
         SaveWindowBounds();
         _refreshTimer.Dispose();
+        _bwSaveTimer.Dispose();
+        _settings.Save();
         _ping.Dispose();
         _traffic.Dispose();
         _trayIcon.Dispose();
@@ -518,6 +526,8 @@ public class MainForm : Form
     {
         SaveWindowBounds();
         _refreshTimer.Dispose();
+        _bwSaveTimer.Dispose();
+        _settings.Save();
         _ping.Dispose();
         _traffic.Dispose();
         _trayIcon.Visible = false;
@@ -601,6 +611,22 @@ public class MainForm : Form
         if (InvokeRequired) { Invoke(() => OnTrafficUpdated(stats)); return; }
 
         _trafficGraph.Push(stats.DownBytesPerSec, stats.UpBytesPerSec);
+
+        // Accumulate bandwidth totals for the currently connected SSID
+        if (stats.DownBytesPerSec > 0 || stats.UpBytesPerSec > 0)
+        {
+            var connectedSsid = _networks.FirstOrDefault(n => n.IsConnected)?.SSID;
+            if (!string.IsNullOrEmpty(connectedSsid))
+            {
+                if (!_settings.BandwidthTotals.TryGetValue(connectedSsid, out var rec))
+                {
+                    rec = new BandwidthRecord();
+                    _settings.BandwidthTotals[connectedSsid] = rec;
+                }
+                rec.BytesDown += stats.DownBytesPerSec;
+                rec.BytesUp   += stats.UpBytesPerSec;
+            }
+        }
 
         bool bits = _settings.TrafficShowBits;
         _trafficDownLabel.Text = $"↓ {FormatSpeed(stats.DownBytesPerSec, bits)}";
@@ -865,6 +891,19 @@ public class MainForm : Form
             UpdateNetworkUI(_networks);
         };
         menu.Items.Add(hideAllItem);
+        if (_settings.BandwidthTotals.ContainsKey(net.SSID))
+        {
+            menu.Items.Add(new ToolStripSeparator());
+            var clearBwItem = new ToolStripMenuItem($"Clear bandwidth data for \"{net.SSID}\"");
+            clearBwItem.Click += (s, e) =>
+            {
+                _settings.BandwidthTotals.Remove(net.SSID);
+                _settings.Save();
+                UpdateNetworkUI(_networks);
+            };
+            menu.Items.Add(clearBwItem);
+        }
+
         menu.Show(screenPt);
     }
 
@@ -946,6 +985,7 @@ public class MainForm : Form
 public class NetworkButton : Control
 {
     internal static bool ShowSignalBars = true;
+    internal static Dictionary<string, BandwidthRecord>? BandwidthData;
 
     private WifiNetwork _net;
     public event Action<string>? LeftClicked;
@@ -955,10 +995,12 @@ public class NetworkButton : Control
     public string NetworkSSID => _net.SSID;
     public WifiNetwork CurrentNetwork => _net;
 
+    private int PreferredHeight => BandwidthData != null && BandwidthData.ContainsKey(_net.SSID) ? 54 : 40;
+
     public NetworkButton(WifiNetwork net, int width)
     {
         _net = net;
-        Size = new Size(width, 40);
+        Size = new Size(width, PreferredHeight);
         Margin = new Padding(0, 1, 0, 1);
         Cursor = Cursors.Hand;
         DoubleBuffered = true;
@@ -968,6 +1010,8 @@ public class NetworkButton : Control
     {
         _net = net;
         if (Width != width) Width = width;
+        int h = PreferredHeight;
+        if (Height != h) Height = h;
         Invalidate();
     }
 
@@ -1038,8 +1082,19 @@ public class NetworkButton : Control
             }
         }
 
-        // BSSID — small grey text at the bottom of the button
-        if (!string.IsNullOrEmpty(_net.BSSID))
+        // Bandwidth row — shown at bottom when data exists, otherwise fall back to BSSID
+        if (BandwidthData != null && BandwidthData.TryGetValue(_net.SSID, out var bw))
+        {
+            double down  = bw.BytesDown  / 1e9;
+            double up    = bw.BytesUp    / 1e9;
+            double total = bw.BytesTotal / 1e9;
+            string bwText = $"↓ {down:F2} GB   ↑ {up:F2} GB   Total: {total:F2} GB";
+            using var bwFont = new Font("Segoe UI", 6.5f);
+            using var bwBr   = new SolidBrush(Color.FromArgb(90, 90, 90));
+            using var bwSf   = new StringFormat { LineAlignment = StringAlignment.Far, Trimming = StringTrimming.EllipsisCharacter, FormatFlags = StringFormatFlags.NoWrap };
+            g.DrawString(bwText, bwFont, bwBr, new RectangleF(textLeft, 0, barsX - textLeft - 2, Height - 3), bwSf);
+        }
+        else if (!string.IsNullOrEmpty(_net.BSSID))
         {
             using var bssidFont = new Font("Consolas", 6f);
             using var bssidBr   = new SolidBrush(Color.FromArgb(70, 70, 70));
