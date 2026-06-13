@@ -28,6 +28,8 @@ public class TrafficMonitor : IDisposable
     private long _prevPktsIn,  _prevPktsOut;
     private bool _baselineSet;
     private string? _cachedNicId;
+    private NetworkInterface? _cachedNic;
+    private int _nicCheckCountdown = 0; // re-query NIC list every 10 ticks
 
     public void Start()
     {
@@ -79,18 +81,23 @@ public class TrafficMonitor : IDisposable
         {
             long bytesIn = 0, bytesOut = 0, pktsIn = 0, pktsOut = 0;
 
-            // Re-query fresh NIC list each tick to get live OperationalStatus.
-            // If the chosen NIC changes, reset the baseline to avoid phantom deltas.
-            var fresh = PickNic();
-            if (fresh?.Id != _cachedNicId)
+            // Re-query NIC list every 10 ticks (10s) to detect adapter changes without
+            // calling GetAllNetworkInterfaces() on every 1s sample.
+            if (--_nicCheckCountdown <= 0)
             {
-                _cachedNicId = fresh?.Id;
-                _prevBytesIn = _prevBytesOut = _prevPktsIn = _prevPktsOut = 0;
-                _baselineSet = false;
+                _nicCheckCountdown = 10;
+                var fresh = PickNic();
+                if (fresh?.Id != _cachedNicId)
+                {
+                    _cachedNicId = fresh?.Id;
+                    _cachedNic   = fresh;
+                    _prevBytesIn = _prevBytesOut = _prevPktsIn = _prevPktsOut = 0;
+                    _baselineSet = false;
+                }
             }
-            if (fresh != null)
+            if (_cachedNic != null)
             {
-                var s = fresh.GetIPStatistics();
+                var s = _cachedNic.GetIPStatistics();
                 bytesIn  = s.BytesReceived;
                 bytesOut = s.BytesSent;
                 pktsIn   = s.UnicastPacketsReceived + s.NonUnicastPacketsReceived;

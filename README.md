@@ -28,7 +28,7 @@ A lightweight always-on-top widget that sits on your desktop and keeps an eye on
 - **Fully customisable** — colours, opacity, ping interval, graph visibility, signal bars, auto-swap priority order
 - **System tray** — minimises to tray on close, single-click to restore, single instance
 - **Start with Windows** — optional autostart via Task Scheduler
-- **Low resource usage** — ~0.5% CPU idle, ~30 MB private memory, pinned to the last CPU core to avoid interfering with OS and game workloads
+- **Low resource usage** — ~0.5–2% CPU idle (brief spike on startup), ~30–40 MB private memory (~90–100 MB working set), pinned to the last CPU core to avoid interfering with OS and game workloads
 
 ## Requirements
 
