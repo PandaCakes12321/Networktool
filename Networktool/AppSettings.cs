@@ -1,6 +1,6 @@
 // Networktool — Floating network monitor widget for Windows
 // Author : Teffers
-// Version: 1.09
+// Version: 1.10
 // License: Private
 
 using System;
@@ -9,14 +9,6 @@ using System.IO;
 using System.Text.Json;
 
 namespace Networktool;
-
-public class BandwidthRecord
-{
-    public long BytesDown { get; set; }
-    public long BytesUp   { get; set; }
-    [System.Text.Json.Serialization.JsonIgnore]
-    public long BytesTotal => BytesDown + BytesUp;
-}
 
 public class AppSettings
 {
@@ -52,8 +44,6 @@ public class AppSettings
     public int ColourGraphDl     { get; set; } = unchecked((int)0xFF3C8CDC);  // download blue
     public int ColourGraphUl     { get; set; } = unchecked((int)0xFFDC5096);  // upload pink
     public int ColourGraphPing   { get; set; } = unchecked((int)0xFF50C878);  // ping green
-
-    public Dictionary<string, BandwidthRecord> BandwidthTotals { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
     private static readonly string SettingsPath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),

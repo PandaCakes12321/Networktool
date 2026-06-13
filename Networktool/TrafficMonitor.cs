@@ -1,6 +1,6 @@
 // Networktool — Floating network monitor widget for Windows
 // Author : Teffers
-// Version: 1.09
+// Version: 1.10
 // License: Private
 
 using System;
@@ -26,10 +26,12 @@ public class TrafficMonitor : IDisposable
     private CancellationTokenSource _cts = new();
     private long _prevBytesIn, _prevBytesOut;
     private long _prevPktsIn,  _prevPktsOut;
-    private NetworkInterface? _cachedNic;
+    private bool _baselineSet;
+    private string? _cachedNicId;
 
     public void Start()
     {
+        _cts.Dispose();
         _cts = new CancellationTokenSource();
         SampleOnce(); // initialise baseline
         Task.Run(() => RunLoop(_cts.Token));
@@ -48,6 +50,7 @@ public class TrafficMonitor : IDisposable
 
     // Pick the single best physical NIC to read from.
     // Priority: WiFi → Ethernet → anything Up that isn't loopback/tunnel/virtual.
+    // Returns the NIC's Id (stable across GetAllNetworkInterfaces calls) and the object.
     private static NetworkInterface? PickNic()
     {
         var all = NetworkInterface.GetAllNetworkInterfaces()
@@ -55,11 +58,14 @@ public class TrafficMonitor : IDisposable
             .Where(n => n.NetworkInterfaceType != NetworkInterfaceType.Loopback)
             .Where(n => n.NetworkInterfaceType != NetworkInterfaceType.Tunnel)
             .Where(n => !n.Description.Contains("Virtual",    StringComparison.OrdinalIgnoreCase))
+            .Where(n => !n.Description.Contains("Miniport",   StringComparison.OrdinalIgnoreCase))
             .Where(n => !n.Description.Contains("Hyper-V",    StringComparison.OrdinalIgnoreCase))
             .Where(n => !n.Description.Contains("VMware",     StringComparison.OrdinalIgnoreCase))
             .Where(n => !n.Description.Contains("VirtualBox", StringComparison.OrdinalIgnoreCase))
             .Where(n => !n.Description.Contains("TAP",        StringComparison.OrdinalIgnoreCase))
             .Where(n => !n.Description.Contains("Pseudo",     StringComparison.OrdinalIgnoreCase))
+            .Where(n => !n.Description.Contains("WireGuard",  StringComparison.OrdinalIgnoreCase))
+            .Where(n => !n.Description.Contains("Loopback",   StringComparison.OrdinalIgnoreCase))
             .ToList();
 
         return all.FirstOrDefault(n => n.NetworkInterfaceType == NetworkInterfaceType.Wireless80211)
@@ -73,26 +79,32 @@ public class TrafficMonitor : IDisposable
         {
             long bytesIn = 0, bytesOut = 0, pktsIn = 0, pktsOut = 0;
 
-            // Re-pick only if cached NIC has gone down
-            if (_cachedNic == null || _cachedNic.OperationalStatus != OperationalStatus.Up)
-                _cachedNic = PickNic();
-            var nic = _cachedNic;
-            if (nic != null)
+            // Re-query fresh NIC list each tick to get live OperationalStatus.
+            // If the chosen NIC changes, reset the baseline to avoid phantom deltas.
+            var fresh = PickNic();
+            if (fresh?.Id != _cachedNicId)
             {
-                var s = nic.GetIPStatistics();
+                _cachedNicId = fresh?.Id;
+                _prevBytesIn = _prevBytesOut = _prevPktsIn = _prevPktsOut = 0;
+                _baselineSet = false;
+            }
+            if (fresh != null)
+            {
+                var s = fresh.GetIPStatistics();
                 bytesIn  = s.BytesReceived;
                 bytesOut = s.BytesSent;
                 pktsIn   = s.UnicastPacketsReceived + s.NonUnicastPacketsReceived;
                 pktsOut  = s.UnicastPacketsSent     + s.NonUnicastPacketsSent;
             }
 
-            if (_prevBytesIn == 0 && _prevBytesOut == 0)
+            if (!_baselineSet)
             {
-                // first sample — just store baseline, emit zeros
+                // first sample on this NIC — store baseline, emit zeros
                 _prevBytesIn  = bytesIn;
                 _prevBytesOut = bytesOut;
                 _prevPktsIn   = pktsIn;
                 _prevPktsOut  = pktsOut;
+                _baselineSet  = true;
                 Updated?.Invoke(new TrafficStats());
                 return;
             }

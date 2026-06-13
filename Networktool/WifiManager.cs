@@ -1,6 +1,6 @@
 // Networktool — Floating network monitor widget for Windows
 // Author : Teffers
-// Version: 1.09
+// Version: 1.10
 // License: Private
 
 using System;
@@ -324,6 +324,31 @@ public static class WifiManager
             finally { WlanFreeMemory(dataPtr); }
         }
         catch { return ""; }
+    }
+
+    // Fast synchronous SSID check — opens a handle, queries once, closes.
+    // ~1 ms, no process spawn. Safe to call every second.
+    public static string GetConnectedSsidNow()
+    {
+        var handle    = IntPtr.Zero;
+        var ifListPtr = IntPtr.Zero;
+        try
+        {
+            if (WlanOpenHandle(2, IntPtr.Zero, out _, out handle) != 0 || handle == IntPtr.Zero) return "";
+            WlanEnumInterfaces(handle, IntPtr.Zero, out ifListPtr);
+            int count = Marshal.ReadInt32(ifListPtr);
+            if (count < 1) return "";
+            var ifInfoPtr = new IntPtr(ifListPtr.ToInt64() + 8);
+            var ifInfo    = Marshal.PtrToStructure<WLAN_INTERFACE_INFO>(ifInfoPtr);
+            var guid      = ifInfo.InterfaceGuid;
+            return GetConnectedSsidFromHandle(handle, ref guid);
+        }
+        catch { return ""; }
+        finally
+        {
+            if (ifListPtr != IntPtr.Zero) WlanFreeMemory(ifListPtr);
+            if (handle    != IntPtr.Zero) WlanCloseHandle(handle, IntPtr.Zero);
+        }
     }
 
     public static async Task<string> GetConnectedSsidAsync()

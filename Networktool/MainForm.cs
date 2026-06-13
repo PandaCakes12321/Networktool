@@ -1,6 +1,6 @@
 // Networktool — Floating network monitor widget for Windows
 // Author : Teffers
-// Version: 1.09
+// Version: 1.10
 // License: Private
 
 using System;
@@ -23,9 +23,12 @@ public class MainForm : Form
     private TrafficMonitor _traffic = null!;
     private System.Windows.Forms.Timer _refreshTimer = null!;
     private System.Windows.Forms.Timer _bwSaveTimer = null!;
+    private BandwidthStore _bw = null!;
+    private string? _lastConnectedSsid;
     private NotifyIcon _trayIcon = null!;
     private volatile bool _isSwapping = false;
     private volatile bool _isScanning = false;
+    private volatile bool _exiting    = false;
     private long _lastKnownPingMs = 0;
 
     // drag support
@@ -60,6 +63,9 @@ public class MainForm : Form
         _ping.StatusChanged += OnPingStatusChanged;
         _ping.Start();
 
+        _bw = new BandwidthStore();
+        NetworkButton.BwStore = _bw;
+
         _traffic = new TrafficMonitor();
         _traffic.Updated += OnTrafficUpdated;
         _traffic.Start();
@@ -67,10 +73,8 @@ public class MainForm : Form
         _refreshTimer = new System.Windows.Forms.Timer { Interval = 5000 };
         _refreshTimer.Tick += async (s, e) => await RefreshNetworksAsync();
         _refreshTimer.Start();
-
-        NetworkButton.BandwidthData = _settings.BandwidthTotals;
         _bwSaveTimer = new System.Windows.Forms.Timer { Interval = 60000 };
-        _bwSaveTimer.Tick += (s, e) => _settings.Save();
+        _bwSaveTimer.Tick += (s, e) => _bw.Flush();
         _bwSaveTimer.Start();
 
         Load += async (s, e) =>
@@ -512,9 +516,11 @@ public class MainForm : Form
             _trayIcon.ShowBalloonTip(1500, "Networktool", "Running in tray. Right-click to exit.", ToolTipIcon.Info);
             return;
         }
+        if (_exiting) { base.OnFormClosing(e); return; } // ExitApp already cleaned up
         SaveWindowBounds();
         _refreshTimer.Dispose();
         _bwSaveTimer.Dispose();
+        _bw.Flush();
         _settings.Save();
         _ping.Dispose();
         _traffic.Dispose();
@@ -524,9 +530,11 @@ public class MainForm : Form
 
     private void ExitApp()
     {
+        _exiting = true;
         SaveWindowBounds();
         _refreshTimer.Dispose();
         _bwSaveTimer.Dispose();
+        _bw.Flush();
         _settings.Save();
         _ping.Dispose();
         _traffic.Dispose();
@@ -613,20 +621,14 @@ public class MainForm : Form
         _trafficGraph.Push(stats.DownBytesPerSec, stats.UpBytesPerSec);
 
         // Accumulate bandwidth totals for the currently connected SSID
-        if (stats.DownBytesPerSec > 0 || stats.UpBytesPerSec > 0)
+        var connectedSsid = _networks.FirstOrDefault(n => n.IsConnected)?.SSID;
+        if (connectedSsid != _lastConnectedSsid)
         {
-            var connectedSsid = _networks.FirstOrDefault(n => n.IsConnected)?.SSID;
-            if (!string.IsNullOrEmpty(connectedSsid))
-            {
-                if (!_settings.BandwidthTotals.TryGetValue(connectedSsid, out var rec))
-                {
-                    rec = new BandwidthRecord();
-                    _settings.BandwidthTotals[connectedSsid] = rec;
-                }
-                rec.BytesDown += stats.DownBytesPerSec;
-                rec.BytesUp   += stats.UpBytesPerSec;
-            }
+            _bw.OnNetworkChanged(connectedSsid);
+            _lastConnectedSsid = connectedSsid;
         }
+        if ((stats.DownBytesPerSec > 0 || stats.UpBytesPerSec > 0) && !string.IsNullOrEmpty(connectedSsid))
+            _bw.Add(connectedSsid, stats.DownBytesPerSec, stats.UpBytesPerSec);
 
         bool bits = _settings.TrafficShowBits;
         _trafficDownLabel.Text = $"↓ {FormatSpeed(stats.DownBytesPerSec, bits)}";
@@ -721,6 +723,7 @@ public class MainForm : Form
                     else _failCountLabel.Visible = false;
                     SoundManager.PlaySwapSuccess();
                     DebugWindow.Info($"[AutoSwap] swapped to '{ssid}' successfully");
+                    await RefreshNetworksAsync(); // update IsConnected so bandwidth tracks the new network immediately
                     break;
                 }
             }
@@ -891,14 +894,13 @@ public class MainForm : Form
             UpdateNetworkUI(_networks);
         };
         menu.Items.Add(hideAllItem);
-        if (_settings.BandwidthTotals.ContainsKey(net.SSID))
+        if (_bw.Contains(net.SSID))
         {
             menu.Items.Add(new ToolStripSeparator());
             var clearBwItem = new ToolStripMenuItem($"Clear bandwidth data for \"{net.SSID}\"");
             clearBwItem.Click += (s, e) =>
             {
-                _settings.BandwidthTotals.Remove(net.SSID);
-                _settings.Save();
+                _bw.Clear(net.SSID);
                 UpdateNetworkUI(_networks);
             };
             menu.Items.Add(clearBwItem);
@@ -985,7 +987,7 @@ public class MainForm : Form
 public class NetworkButton : Control
 {
     internal static bool ShowSignalBars = true;
-    internal static Dictionary<string, BandwidthRecord>? BandwidthData;
+    internal static BandwidthStore? BwStore;
 
     private WifiNetwork _net;
     public event Action<string>? LeftClicked;
@@ -995,7 +997,7 @@ public class NetworkButton : Control
     public string NetworkSSID => _net.SSID;
     public WifiNetwork CurrentNetwork => _net;
 
-    private int PreferredHeight => BandwidthData != null && BandwidthData.ContainsKey(_net.SSID) ? 54 : 40;
+    private int PreferredHeight => BwStore != null && BwStore.Contains(_net.SSID) ? 54 : 40;
 
     public NetworkButton(WifiNetwork net, int width)
     {
@@ -1083,14 +1085,11 @@ public class NetworkButton : Control
         }
 
         // Bandwidth row — shown at bottom when data exists, otherwise fall back to BSSID
-        if (BandwidthData != null && BandwidthData.TryGetValue(_net.SSID, out var bw))
+        if (BwStore != null && BwStore.TryGet(_net.SSID, out var bw))
         {
-            double down  = bw.BytesDown  / 1e9;
-            double up    = bw.BytesUp    / 1e9;
-            double total = bw.BytesTotal / 1e9;
-            string bwText = $"↓ {down:F2} GB   ↑ {up:F2} GB   Total: {total:F2} GB";
+            string bwText = $"↓ {bw.GBDown:F3} GB   ↑ {bw.GBUp:F3} GB   Total: {bw.GBTotal:F3} GB";
             using var bwFont = new Font("Segoe UI", 6.5f);
-            using var bwBr   = new SolidBrush(Color.FromArgb(90, 90, 90));
+            using var bwBr   = new SolidBrush(Color.FromArgb(160, 160, 160));
             using var bwSf   = new StringFormat { LineAlignment = StringAlignment.Far, Trimming = StringTrimming.EllipsisCharacter, FormatFlags = StringFormatFlags.NoWrap };
             g.DrawString(bwText, bwFont, bwBr, new RectangleF(textLeft, 0, barsX - textLeft - 2, Height - 3), bwSf);
         }

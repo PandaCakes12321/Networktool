@@ -5,11 +5,11 @@
 
   **Floating network monitor widget for Windows**
 
-  *by Teffers — v1.09*
+  *by Teffers — v1.10*
 
   ![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11-blue)
   ![.NET](https://img.shields.io/badge/.NET-9.0-purple)
-  ![Version](https://img.shields.io/badge/version-1.09-brightgreen)
+  ![Version](https://img.shields.io/badge/version-1.10-brightgreen)
 </div>
 
 ---
