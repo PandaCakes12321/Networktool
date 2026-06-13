@@ -20,14 +20,15 @@ A lightweight always-on-top widget that sits on your desktop and keeps an eye on
 
 - **Live ping monitor** — tracks latency to a configurable target (default `8.8.8.8`) with a scrolling graph and peak line
 - **Live traffic graphs** — real-time download/upload speed with scrolling EKG-style graphs (Mbps or MB/s)
-- **Auto network swap** — detects connection failures and automatically switches to the best available WiFi AP based on your priority list
+- **Bandwidth totals** — tracks cumulative download, upload, and total data used per SSID across sessions, shown on each network button — right-click to clear
+- **Auto network swap** — detects connection failures and automatically switches to the best available WiFi AP based on your priority list, with audio cues on fail and on successful swap
 - **Per-BSSID filtering** — hide individual access points by MAC address, not just by SSID — handy for mesh networks
 - **Internet connectivity indicator** — green/red dot on each network shows whether it advertises internet access
 - **Signal strength bars** — visual signal quality indicator on each network button
 - **Fully customisable** — colours, opacity, ping interval, graph visibility, signal bars, auto-swap priority order
 - **System tray** — minimises to tray on close, single-click to restore, single instance
 - **Start with Windows** — optional autostart via Task Scheduler
-- **Low resource usage** — ~0.5% CPU idle, ~30 MB private memory (~90 MB working set), pinned to the last CPU core to avoid interfering with OS and game workloads
+- **Low resource usage** — ~0.5% CPU idle, ~30 MB private memory, pinned to the last CPU core to avoid interfering with OS and game workloads
 
 ## Requirements
 
@@ -38,10 +39,11 @@ A lightweight always-on-top widget that sits on your desktop and keeps an eye on
 ## Usage
 
 1. Run `Networktool.exe` as **Administrator**
-2. The widget appears in the top-right of your screen — drag it anywhere
+2. The widget appears on your screen — drag it anywhere
 3. Click the **⚙** cog to open Settings
-4. Right-click any network in the list to hide it by SSID or by specific AP (BSSID)
-5. Close button (✕) hides to tray — single-click the tray icon to restore
+4. Click **⇄** to toggle auto-swap on/off
+5. Right-click any network to hide it by SSID, by specific AP (BSSID), or to clear its bandwidth data
+6. Close button (✕) hides to tray — single-click the tray icon to restore
 
 ## Settings
 
