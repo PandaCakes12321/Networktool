@@ -79,6 +79,7 @@ public class MainForm : Form
     private void BuildUI()
     {
         FormBorderStyle = FormBorderStyle.None;
+        ShowInTaskbar = false;
         StartPosition = FormStartPosition.Manual;
         BackColor = Color.FromArgb(_settings.ColourBackground);
         ForeColor = Color.White;
