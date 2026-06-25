@@ -3,13 +3,14 @@
 
   # Networktool
 
-  **Floating network monitor widget for Windows**
+  **Floating network monitor widget for Windows & Linux**
 
-  *by Teffers — v1.10*
+  *by Teffers — v1.11*
 
-  ![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11-blue)
+  ![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11%20%7C%20Linux-blue)
   ![.NET](https://img.shields.io/badge/.NET-9.0-purple)
-  ![Version](https://img.shields.io/badge/version-1.10-brightgreen)
+  ![Python](https://img.shields.io/badge/Python-3.12-green)
+  ![Version](https://img.shields.io/badge/version-1.11-brightgreen)
 </div>
 
 ---
@@ -32,18 +33,29 @@ A lightweight always-on-top widget that sits on your desktop and keeps an eye on
 
 ## Requirements
 
+### Windows
 - Windows 10 or Windows 11
 - [.NET 9.0 Runtime](https://dotnet.microsoft.com/download/dotnet/9.0)
 - Must be run as **Administrator** (required for WiFi API access)
 
+### Linux
+- Linux with GTK3 and NetworkManager
+- Python 3.12+ with dependencies: `PyGObject`, `dbus-python`, `psutil`, `gstreamer`
+- See `LINUXV/networktool/` for source
+
 ## Usage
 
+### Windows
 1. Run `Networktool.exe` as **Administrator**
 2. The widget appears on your screen — drag it anywhere
 3. Click the **⚙** cog to open Settings
 4. Click **⇄** to toggle auto-swap on/off
 5. Right-click any network to hide it by SSID, by specific AP (BSSID), or to clear its bandwidth data
 6. Close button (✕) hides to tray — single-click the tray icon to restore
+
+### Linux
+1. Run `python3 LINUXV/main.py` (may need `sudo` for NetworkManager access)
+2. Same controls as the Windows version
 
 ## Settings
 
@@ -63,11 +75,18 @@ A lightweight always-on-top widget that sits on your desktop and keeps an eye on
 
 ## Building from Source
 
+### Windows
 ```
 dotnet build Networktool/Networktool/Networktool.csproj -c Release
 ```
-
 Requires .NET 9 SDK and Windows.
+
+### Linux
+No build step — pure Python. Just run:
+```
+python3 LINUXV/main.py
+```
+Requires Python 3.12+, PyGObject, dbus-python, psutil, and GStreamer.
 
 ---
 

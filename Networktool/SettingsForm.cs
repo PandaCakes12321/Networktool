@@ -1,6 +1,6 @@
 // Networktool — Floating network monitor widget for Windows
 // Author : Teffers
-// Version: 1.10
+// Version: 1.11
 // License: Private
 
 using System;

@@ -1,15 +1,13 @@
 // Networktool — Floating network monitor widget for Windows
 // Author : Teffers
-// Version: 1.10
+// Version: 1.11
 // License: Private
 
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text;
-using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 
 namespace Networktool;
@@ -171,6 +169,44 @@ public static class WifiManager
         public uint dot11CipherAlgorithm;
     }
 
+    // ── WlanGetNetworkBssList support (replaces netsh) ──────────────
+
+    [DllImport("wlanapi.dll")]
+    private static extern uint WlanGetNetworkBssList(IntPtr hClientHandle, ref Guid pInterfaceGuid,
+        IntPtr pDot11Ssid, uint dot11BssType, bool bSecurityEnabled, IntPtr pReserved, out IntPtr ppWlanBssList);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct DOT11_SSID
+    {
+        public uint uSSIDLength;
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 32)]
+        public byte[] ucSSID;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct WLAN_BSS_ENTRY
+    {
+        public DOT11_SSID dot11Ssid;
+        public uint uPhyId;
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 6)]
+        public byte[] dot11Bssid;
+        public uint dot11BssType;
+        public uint dot11PhyType;
+        public int lRssi;
+        public uint uLinkQuality;
+        public bool bInRegDomain;
+        public ushort usBeaconPeriod;
+        public long ullTimestamp;
+        public long ullHostTimestamp;
+        public ushort usCapabilityInformation;
+        public uint ulChCenterFrequency;
+        public uint uRateSetLength;
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 126)]
+        public ushort[] usRateSet;
+        public uint ulIeOffset;
+        public uint ulIeSize;
+    }
+
     #endregion
 
     public static async Task<WifiScanResult> GetNetworksAsync()
@@ -227,7 +263,7 @@ public static class WifiManager
                         }
                         finally { WlanFreeMemory(netListPtr); }
 
-                        var bssidRows = GetBssidMapFromNetsh();
+                        var bssidRows = GetBssidMapFromApi(handle, ref guid);
                         var seenBssid = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
                         foreach (var (ssid, bssid, signal) in bssidRows)
@@ -514,43 +550,32 @@ public static class WifiManager
         public uint dwFlags;
     }
 
-    private static List<(string ssid, string bssid, int signal)> GetBssidMapFromNetsh()
+    private static List<(string ssid, string bssid, int signal)> GetBssidMapFromApi(IntPtr handle, ref Guid guid)
     {
         var result = new List<(string, string, int)>();
         try
         {
-            var psi = new ProcessStartInfo("netsh", "wlan show networks mode=bssid")
+            uint ret = WlanGetNetworkBssList(handle, ref guid, IntPtr.Zero, 0, false, IntPtr.Zero, out var bssListPtr);
+            if (ret != 0) return result;
+            try
             {
-                RedirectStandardOutput = true,
-                UseShellExecute = false,
-                CreateNoWindow = true
-            };
-            using var p = Process.Start(psi)!;
-            var output = p.StandardOutput.ReadToEnd();
-            p.WaitForExit(5000);
-
-            string currentSsid = "";
-            string currentBssid = "";
-            foreach (var rawLine in output.Split('\n'))
-            {
-                var line = rawLine.Trim();
-                var ssidMatch = Regex.Match(line, @"^SSID \d+\s*:\s*(.+)$");
-                if (ssidMatch.Success) { currentSsid = ssidMatch.Groups[1].Value.Trim(); continue; }
-
-                var bssidMatch = Regex.Match(line, @"^BSSID \d+\s*:\s*([0-9A-Fa-f]{2}(?:[:\-][0-9A-Fa-f]{2}){5})$");
-                if (bssidMatch.Success)
+                int count = Marshal.ReadInt32(bssListPtr, 4);
+                int entrySize = Marshal.SizeOf<WLAN_BSS_ENTRY>();
+                for (int i = 0; i < count; i++)
                 {
-                    currentBssid = bssidMatch.Groups[1].Value.ToUpperInvariant().Replace('-', ':');
-                    continue;
-                }
-
-                var sigMatch = Regex.Match(line, @"^Signal\s*:\s*(\d+)%$");
-                if (sigMatch.Success && !string.IsNullOrEmpty(currentSsid) && !string.IsNullOrEmpty(currentBssid))
-                {
-                    result.Add((currentSsid, currentBssid, int.Parse(sigMatch.Groups[1].Value)));
-                    currentBssid = "";
+                    var entryPtr = new IntPtr(bssListPtr.ToInt64() + 8 + i * entrySize);
+                    var entry = Marshal.PtrToStructure<WLAN_BSS_ENTRY>(entryPtr);
+                    if (entry.dot11Ssid.ucSSID == null || entry.dot11Bssid == null) continue;
+                    var ssid = entry.dot11Ssid.uSSIDLength > 0
+                        ? Encoding.UTF8.GetString(entry.dot11Ssid.ucSSID, 0, (int)entry.dot11Ssid.uSSIDLength)
+                        : "";
+                    if (string.IsNullOrWhiteSpace(ssid)) continue;
+                    var bssid = string.Join(":", entry.dot11Bssid.Select(b => $"{b:X2}"));
+                    int signal = (int)Math.Clamp(entry.uLinkQuality, 0u, 100u);
+                    result.Add((ssid, bssid, signal));
                 }
             }
+            finally { WlanFreeMemory(bssListPtr); }
         }
         catch { }
         return result;
